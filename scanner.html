@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>scanner</title>
+    <link href='https://fonts.googleapis.com/css?family=Noto Sans' rel='stylesheet'>
+    <style>
+        * { touch-action: manipulation; }
+
+        body{
+            margin: 0px;
+            padding: 0px;
+            font-size: 62.5%;
+            font-family: 'Noto Sans';
+            text-align: center;
+        }
+
+        video{
+            width: 99.9%;
+            height: 45%;
+            border: solid 1px black;
+            position: relative;
+        }
+        
+        span{
+            font-size: 3.5em;
+        }
+        
+        input{
+            font-size: 3.5em;
+        }
+
+        input.number{
+            width: 5%;
+        }
+        
+        input.slider{
+            height: 2px;
+            width: 60vw;
+            accent-color: #b6b8b6;
+            background: #; 
+            appearance: none;
+        }
+      
+
+        select{
+            font-size: 3.5em;
+        }
+    </style>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+    <span>currentQRCode : </span> <input class="qrcodeData" id="result" type="text" readonly /> <br/>
+    <video id="camera" autoplay></video> <br/>
+    <span>zoom : </span> <input id="zoom" class="number" type="text" readonly /> <br/>
+    <input type="range" class="slider" min="1" max="100" value="50" id="zoomSlider"> <br />
+    <span>camera : </span><select id="cameras"></select>
+    <script type="module">
+        import QrScanner from './qr-scanner.min.js';
+
+        function getCurrentFrameAsImage(videoElementID) {
+            const videoElement = document.getElementById(videoElementID);
+            
+            if (!videoElement || !(videoElement instanceof HTMLVideoElement)) {
+                console.error("Invalid video element ID or element not found.");
+                return null;
+            }
+
+            const canvas = document.createElement('canvas');
+            canvas.width = videoElement.videoWidth;
+            canvas.height = videoElement.videoHeight;
+            const context = canvas.getContext('2d');
+            context.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+
+            const imageElement = new Image();
+            imageElement.src = canvas.toDataURL('image/png');
+
+            return imageElement;
+        }
+
+        function bindChangeHandler(selectElementId, onChangeFunction) {
+            const selectElement = document.getElementById(selectElementId);
+
+            selectElement.addEventListener("change", () => {
+                onChangeFunction(selectElement.value);
+            });
+        }
+
+        function createSelectFromArray(array, selectElementId) {
+        
+            const selectElement = document.getElementById(selectElementId);
+            selectElement.innerHTML = '';
+            array.forEach(optionValue => {
+                const option = document.createElement("option");
+                option.text = optionValue;
+                option.value = optionValue;
+                selectElement.appendChild(option);
+            });
+        }
+
+        var cameras = {}
+        var currentCamTrack;
+        var zoom;
+        var zoomStep;
+        var zoomMax;
+        var zoomMin;
+        var socket = io()
+        var interval;
+        var timeout
+
+        window.socket = socket
+
+        var zoomSliderElement = document.getElementById("zoomSlider")
+      
+        function change(){
+          var zoomSliderElement = document.getElementById("zoomSlider")
+          zoom = zoomStep*(zoomSliderElement.value)
+          zoomUpdate()
+        }
+
+        function zoomUpdate(){
+            var zoomText = document.getElementById("zoom")
+            if (zoom == undefined){
+                zoomText.value = "not support"
+                return
+            }
+            zoomText.value = (Math.ceil(zoom*10)/10)
+            zoom
+            currentCamTrack.applyConstraints({advanced: [ {zoom: zoom} ]});
+        }
+
+        function zoomIn(){
+            if (zoom == undefined){
+                return
+            }
+            if (zoom >= zoomMax){
+                return
+            }
+            zoom += zoomStep
+            zoomUpdate()
+        }
+        
+        function zoomOut(){
+            if (zoom == undefined){
+                return
+            }
+            if (zoom <= zoomMin){
+                return
+            }
+            zoom -= zoomStep
+            zoomUpdate()
+        }
+        
+
+        async function onCameraChanged(camera){
+            const videoElement = document.getElementById("camera");
+            if (videoElement.srcObject){
+                videoElement.srcObject.getTracks().forEach(t => {t.stop()})
+            }
+
+            var stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    deviceId:{
+                        exact: cameras[camera].deviceId
+                    }
+                }
+            })
+
+            currentCamTrack = stream.getTracks()[0]
+            zoom = currentCamTrack.getSettings().zoom
+            zoomMax = currentCamTrack.getCapabilities().zoom.max
+            zoomMin = currentCamTrack.getCapabilities().zoom.min
+            zoomStep = currentCamTrack.getCapabilities().zoom.step
+            zoomUpdate()
+            zoomSliderElement.min = (1/zoomStep)*zoomMin
+            zoomSliderElement.max = (1/zoomStep)*zoomMax
+            zoomSliderElement.value = (1/zoomStep)*zoom
+            
+            
+            videoElement.srcObject = stream;
+        
+        }
+        
+        async function test(){
+            var videoElement = document.getElementById("camera");
+            var unNeedStream = await navigator.mediaDevices.getUserMedia({video: true});
+            var devices = await navigator.mediaDevices.enumerateDevices()
+            var cameraDevices = devices.filter(device => device.kind === 'videoinput')
+            
+            cameraDevices.forEach(camera => {
+                cameras[camera.label] = camera
+            })
+
+            createSelectFromArray(Object.keys(cameras).sort(), 'cameras')
+            unNeedStream.getTracks().forEach(t => {t.stop()})
+            
+            bindChangeHandler('cameras',onCameraChanged)
+
+            //first update
+            const camerasList = document.getElementById("cameras");
+            if (camerasList.value != ""){
+                onCameraChanged(camerasList.value)
+            }
+            setInterval(async()=>{
+                var qrCodeResult = document.getElementById("result")
+                try{
+                    qrCodeResult.value = await QrScanner.scanImage(getCurrentFrameAsImage("camera"))
+                    socket.emit('QRCodeDetected',qrCodeResult.value)
+                }
+                catch(e){
+                    qrCodeResult.value = "No QRCode found"
+                    console.log(e)
+                }
+            },500)
+            zoomSliderElement.oninput = change
+            socket.emit("ScannerConntected")
+
+        }
+        
+
+        test()
+    </script>
+</body>
+</html>

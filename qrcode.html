@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>qrcode</title>
+    <link href='https://fonts.googleapis.com/css?family=Noto Sans' rel='stylesheet'>
+    <style>
+        * { touch-action: manipulation; }
+
+        body{
+            margin: 0px;
+            padding: 0px;
+            font-size: 62.5%;
+            font-family: 'Noto Sans';
+            text-align: center;
+            height: 100%;
+            width: 100%;
+        }
+
+        div#qrcode{
+            position: absolute;
+            left:50%;
+            top:50%;
+            transform: translate(-50%,-50%);
+        }
+    </style>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.rawgit.com/davidshimjs/qrcodejs/gh-pages/qrcode.min.js"></script>
+    <script>
+        var qrcode;
+        var socket = io()
+        function initNotify() {
+            if ("Notification" in window) {
+                Notification.requestPermission().then(function (permission) {
+                    if (permission === "granted") {
+                        return
+                    }
+                    alert("Please allow notification.");
+                    location.reload()
+                });
+            } else {
+                alert("This browser does not support Web Notifications.");
+            }
+        }
+
+      function sendNotify(title, content) {
+          if ("Notification" in window) {
+              if (Notification.permission === "granted") {
+                  var notification = new Notification(title, {
+                      body: content,
+                  });
+
+              } else {
+                  console.log("Notification permission is not granted.");
+              }
+          } else {
+              console.log("This browser does not support Web Notifications.");
+          }
+      }
+
+      initNotify()
+      
+        socket.on("refresh",(qrcodedata)=>{
+            document.getElementById("qrcode").innerHTML = ""
+            if (qrcode){
+                qrcode.clear()
+            }
+            qrcode = new QRCode(document.getElementById("qrcode"), qrcodedata);
+        })
+        socket.on("notify",()=>{
+            sendNotify("點名瞜～","回到QRCode Sync並開啟行動逢甲來點名～")
+        })
+    </script>
+</head>
+<body>
+    <div id="qrcode"></div>
+</body>
+</html>
