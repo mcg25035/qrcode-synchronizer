@@ -3,60 +3,81 @@
 <head>
     <title>scanner</title>
     <link href='https://fonts.googleapis.com/css?family=Noto Sans' rel='stylesheet'>
-    <style>
-        * { touch-action: manipulation; }
-
-        body{
-            margin: 0px;
-            padding: 0px;
-            font-size: 62.5%;
-            font-family: 'Noto Sans';
-            text-align: center;
-        }
-
-        video{
-            width: 99.9%;
-            height: 45%;
-            border: solid 1px black;
-            position: relative;
-        }
-        
-        span{
-            font-size: 3.5em;
-        }
-        
-        input{
-            font-size: 3.5em;
-        }
-
-        input.number{
-            width: 5%;
-        }
-        
-        input.slider{
-            height: 2px;
-            width: 60vw;
-            accent-color: #b6b8b6;
-            background: #; 
-            appearance: none;
-        }
-      
-
-        select{
-            font-size: 3.5em;
-        }
-    </style>
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios@1.6.7/dist/axios.min.js"></script>
+    <script type="text/javascript" src="https://cdn.rawgit.com/ricmoo/aes-js/e27b99df/index.js"></script>
+
 </head>
 <body>
-    <span>currentQRCode : </span> <input class="qrcodeData" id="result" type="text" readonly /> <br/>
-    <video id="camera" autoplay></video> <br/>
-    <span>zoom : </span> <input id="zoom" class="number" type="text" readonly /> <br/>
+    <video id="camera" autoplay></video><br/>
     <input type="range" class="slider" min="1" max="100" value="50" id="zoomSlider"> <br />
-    <span>camera : </span><select id="cameras"></select>
+    <span>zoom : </span> <input id="zoom" class="number" type="text" readonly /> <br/>
+    <span>QRCode : </span> <input class="qrcodeData" id="result" type="text" readonly /> <br/>
+    <span>camera : </span><select id="cameras"></select><br />
+    <span>FCU API Status : </span><div id="fcu-api-state" class="signal-light inactive"></div><br />
+    <div class="fcu-login">
+        <br /><br /><br /><br /><br />
+        <input type="text" id="fcu-username" placeholder="學號"><br/>
+        <input type="password" id="fcu-password" placeholder="密碼"><br/>
+        <button id="fcu-login-submit">登入</button><br/>
+        <span>以後自動登入：</span>
+        <label class="switch">
+            <input id="auto-login" type="checkbox">
+            <span class="slider"></span>
+        </label><br />
+        <span id="login-status"></span>
+    </div>
+    <span>Self signin succeed : </span>
+    <label class="switch self-signin">
+        <input id="signed" type="checkbox">
+        <span class="slider"></span>
+    </label><br/>
+    <span>
+        <table id="daily-clockin-rec" cellspacing="0" align="Center" rules="all" border="1" style="border-collapse:collapse;"></table>
+    </span>
+    <input type="button" value="Login FCU" onclick="toggleLogin()">
     <script type="module">
         import QrScanner from './qr-scanner.min.js';
+
+        window.toggleLogin = ()=>{
+            var element = document.querySelector("div.fcu-login");
+            var toggleLogin = element.classList.contains("toggle-login")
+            if (toggleLogin){
+                element.classList.remove("toggle-login")
+            }
+            else{
+                element.classList.add("toggle-login")
+            }
+        }
+
+        async function sha256(message) {
+            const msgBuffer = new TextEncoder().encode(message);                    
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            return hashHex;
+        }
+
+        function aes_encrypt(key, iv, text){
+            var textBytes = aesjs.utils.utf8.toBytes(text)
+            var aesCtr = new aesjs.ModeOfOperation.ctr(key, new aesjs.Counter(5));
+            var encryptedBytes = aesCtr.encrypt(textBytes);
+            var encryptedHex = aesjs.utils.hex.fromBytes(encryptedBytes);
+            return encryptedHex
+        }
+
+        function aes_decrypt(key, iv, encryptedHex){
+            var encryptedBytes = aesjs.utils.hex.toBytes(encryptedHex);
+            var aesCtr = new aesjs.ModeOfOperation.ctr(key, new aesjs.Counter(5));
+            var decryptedBytes = aesCtr.decrypt(encryptedBytes);
+            var decryptedText = aesjs.utils.utf8.fromBytes(decryptedBytes);
+            return decryptedText
+        }
+
+        window.keepAliveFCU = ()=>{
+            window.location = 'https://signin.fcu.edu.tw/clockin/ClassClockin.aspx'
+        }
 
         function getCurrentFrameAsImage(videoElementID) {
             const videoElement = document.getElementById(videoElementID);
@@ -106,7 +127,9 @@
         var zoomMin;
         var socket = io()
         var interval;
-        var timeout
+        var timeout;
+        var fcuState = false;
+        var qrcodeLock = false;
 
         window.socket = socket
 
@@ -150,7 +173,93 @@
             zoom -= zoomStep
             zoomUpdate()
         }
+
+        function updateTable(newPageHTML){
+            var parser = new DOMParser()
+            var doc = parser.parseFromString(newPageHTML, "text/html")
+            document.querySelector("table#daily-clockin-rec").innerHTML = doc.querySelector("table#GridViewRec").innerHTML
+        }
         
+        async function selfSingin(qrcode){
+            if (qrcodeLock) return;
+            if (!fcuState) return;
+            qrcodeLock = true;
+            if (document.getElementById("signed").checked) {
+                qrcodeLock = false;
+                return;
+            }
+            try{
+                var res = await axios.get(`https://api.turtle.codingbear.mcloudtw.com/clockin/ClassClockin.aspx?param=${qrcode}`)
+                document.querySelector("label.switch.self-signin").click()
+                console.log("clicked")
+                updateTable(res.data)
+            }
+            catch(e){
+                console.log(e)
+            }
+            qrcodeLock = false;
+        }
+
+        async function fcuLogin(username, password){
+            var form = new FormData()
+            var res = await axios.get("https://api.turtle.codingbear.mcloudtw.com/clockin/Login.aspx")
+            var parser = new DOMParser()
+            var targetDoc = parser.parseFromString(res.data, "text/html")
+            var dotnetData = targetDoc.querySelectorAll("input[type=hidden]")
+            for (var i of dotnetData){
+                form.append(i.name, i.value)
+            }
+            form.append("LoginLdap$UserName", username)
+            form.append("LoginLdap$Password", password)
+            form.append("LoginLdap$LoginButton", "登入")
+            res = await axios.post("https://api.turtle.codingbear.mcloudtw.com/clockin/Login.aspx", form)
+            if (document.getElementById("auto-login").checked){
+                saveAccountInfo(username, password)
+            }
+
+            if (res.request.responseURL.includes("Student.aspx")){
+                return true;
+            }
+            return false;
+
+        }
+
+        async function checkAvaliable(){
+            var form = new FormData()
+            var res = await axios.get("https://api.turtle.codingbear.mcloudtw.com/clockin/Student.aspx")
+            var parser = new DOMParser()
+            var targetDoc = parser.parseFromString(res.data, "text/html")
+            var dotnetData = targetDoc.querySelectorAll("input[type=hidden]")
+            for (var i of dotnetData){
+                form.append(i.name, i.value)
+            }
+            form.append("ButtonClassClockin", "學生課堂打卡")
+
+
+            await axios.post("https://api.turtle.codingbear.mcloudtw.com/clockin/Student.aspx", form)
+            
+            try{
+                var res = await axios.get("https://api.turtle.codingbear.mcloudtw.com/clockin/ClassClockin.aspx")
+                if (!res.request.responseURL.includes("https://api.turtle.codingbear.mcloudtw.com/clockin/ClassClockin.aspx")) return false
+                updateTable(res.data)
+                return true
+            }
+            catch(e){}
+            return false
+        }
+
+        async function updateFcuApiState(){
+            fcuState = await checkAvaliable()
+
+            if (fcuState) {
+                document.getElementById("fcu-api-state").classList.remove("inactive")
+                document.getElementById("fcu-api-state").classList.add("active")
+            }
+            else {
+                document.getElementById("fcu-api-state").classList.add("inactive")
+                document.getElementById("fcu-api-state").classList.remove("active")
+            }
+        }
 
         async function onCameraChanged(camera){
             const videoElement = document.getElementById("camera");
@@ -181,7 +290,9 @@
         
         }
         
-        async function test(){
+        async function main(){
+            window.fcuLogin = fcuLogin
+            axios.defaults.withCredentials = true
             var videoElement = document.getElementById("camera");
             var unNeedStream = await navigator.mediaDevices.getUserMedia({video: true});
             var devices = await navigator.mediaDevices.enumerateDevices()
@@ -204,21 +315,233 @@
             setInterval(async()=>{
                 var qrCodeResult = document.getElementById("result")
                 try{
-                    qrCodeResult.value = await QrScanner.scanImage(getCurrentFrameAsImage("camera"))
-                    socket.emit('QRCodeDetected',qrCodeResult.value)
+                    var qrcode = await QrScanner.scanImage(getCurrentFrameAsImage("camera"))
+                    qrCodeResult.value = qrcode
+                    socket.emit('QRCodeDetected',qrcode)
+                    selfSingin(qrcode);
                 }
                 catch(e){
                     qrCodeResult.value = "No QRCode found"
-                    console.log(e)
                 }
             },500)
             zoomSliderElement.oninput = change
             socket.emit("ScannerConntected")
 
+            // await fcuLogin();
+            var accountInfo = await getAccountInfo();
+            if (!accountInfo) {
+                await updateFcuApiState();
+                return;
+            }
+            await fcuLogin(accountInfo[0], accountInfo[1])
+            await updateFcuApiState();
+        }
+
+        async function saveAccountInfo(username, pwd) {
+            var secretInfo = await sha256(username)
+            var key = "";
+            var iv = "";
+            for (var c of secretInfo){
+                if (key.length < 16) key += c;
+                else if (iv.length < 16) iv += c;
+                else break;
+            }
+            key = Uint8Array.from(Array.from(key).map(letter => letter.charCodeAt(0)));
+            iv = Uint8Array.from(Array.from(iv).map(letter => letter.charCodeAt(0)));
+            var turtle = Uint8Array.from(Array.from("turtlefcucsiefcu").map(letter => letter.charCodeAt(0)));
+            localStorage.setItem("t:session-id", aes_encrypt(turtle, turtle, username))
+            localStorage.setItem("t:session-key", aes_encrypt(key, iv, pwd))
+        }
+
+        async function getAccountInfo() {
+            if (!localStorage.getItem("t:session-id")) return null
+            var username = localStorage.getItem("t:session-id")
+            var password = localStorage.getItem("t:session-key")
+            var turtle = Uint8Array.from(Array.from("turtlefcucsiefcu").map(letter => letter.charCodeAt(0)));
+            username = aes_decrypt(turtle, turtle, username)
+            var secretInfo = await sha256(username)
+            var key = "";
+            var iv = "";
+            for (var c of secretInfo){
+                if (key.length < 16) key += c;
+                else if (iv.length < 16) iv += c;
+                else break;
+            }
+            key = Uint8Array.from(Array.from(key).map(letter => letter.charCodeAt(0)));
+            iv = Uint8Array.from(Array.from(iv).map(letter => letter.charCodeAt(0)));
+            password = aes_decrypt(key, iv, password)
+            return [username, password]
         }
         
-
-        test()
+        document.getElementById("fcu-login-submit").onclick = async ()=>{
+            
+            const username = document.getElementById("fcu-username").value
+            const password = document.getElementById("fcu-password").value
+            if (await fcuLogin(username, password)){
+                document.getElementById("login-status").innerText = "登入成功"
+                var element = document.querySelector("div.fcu-login")
+                var logined = element.classList.contains("toggle-login")
+                if (logined) toggleLogin()
+                await updateFcuApiState();
+            }
+            else{
+                document.getElementById("login-status").innerText = "登入失敗"
+            }
+            
+            
+        }
+        main()
     </script>
+    <style>
+        * { touch-action: manipulation; }
+
+        body{
+            margin: 0px;
+            padding: 0px;
+            font-size: 62.5%;
+            font-family: 'Noto Sans';
+            text-align: center;
+            width: 100vw;
+        }
+
+        video{
+            width: 100%;
+            height: 100%;
+            left: 0%;
+            bottom: 0%;
+            border: solid 1px black;
+        }
+        
+        span{
+            font-size: 3.5em;
+        }
+        
+        input{
+            font-size: 3.5em;
+        }
+
+        input.number{
+            width: 5%;
+        }
+        
+        input.slider{
+            height: 2px;
+            width: 60vw;
+            accent-color: #b6b8b6;
+            background: rgba(0,0,0,0); 
+            appearance: none;
+            /* rotate: 90deg; */
+        }
+
+        /* input::-webkit-slider-thumb{
+            width: 80px;
+            height: 80%;
+        } */
+
+        div.signal-light{
+            position: relative;
+            display: inline-block;
+            width: 3vw;
+            height: 3vw;
+            background-color: gray;
+        }
+
+        div.signal-light.active{
+            background-color: rgb(0, 130, 0);
+        }
+
+        div.signal-light.inactive{
+            background-color: rgb(130, 0, 0);
+        }
+
+        div.fcu-login{
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            position: absolute;
+            width: 85vw;
+            height: 40vh;
+            background-color: #F9EEEE;
+            display: none;
+        }
+
+        div.fcu-login.toggle-login{
+            display: block;
+        }
+
+        div.fcu-login > input{
+            width: 80%;
+            height: 60px;
+            background-color: #FFF;
+        }
+
+        
+
+        div.fcu-login > button{
+            width: 50%;
+            height: 80px;
+            font-size: 30px;
+            background-color: #ededed;
+            display: hidden;
+        }
+
+        select{
+            font-size: 3.5em;
+        }
+    </style>
+    <style>
+        .switch {
+          position: relative;
+          display: inline-block;
+          width: 60px;
+          height: 34px;
+        }
+        
+        .switch input { 
+          opacity: 0;
+          width: 0;
+          height: 0;
+        }
+        
+        label > .slider {
+          position: absolute;
+          cursor: pointer;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background-color: #ccc;
+          -webkit-transition: .4s;
+          transition: .4s;
+          border-radius: 34px;
+        }
+        
+        label > .slider:before {
+          position: absolute;
+          content: "";
+          height: 26px;
+          width: 26px;
+          left: 4px;
+          bottom: 4px;
+          background-color: white;
+          -webkit-transition: .4s;
+          transition: .4s;
+          border-radius: 50%;
+        }
+        
+        label > input:checked + .slider {
+          background-color: #2196F3;
+        }
+        
+        label > input:focus + .slider {
+          box-shadow: 0 0 1px #2196F3;
+        }
+        
+        label > input:checked + .slider:before {
+          -webkit-transform: translateX(26px);
+          -ms-transform: translateX(26px);
+          transform: translateX(26px);
+        }
+    </style>
 </body>
 </html>
