@@ -298,7 +298,11 @@
         function updateTable(newPageHTML){
             var parser = new DOMParser()
             var doc = parser.parseFromString(newPageHTML, "text/html")
+            var oldRows = document.querySelectorAll("table#daily-clockin-rec tr").length
             document.querySelector("table#daily-clockin-rec").innerHTML = doc.querySelector("table#GridViewRec").innerHTML
+            var newRows = document.querySelectorAll("table#daily-clockin-rec tr").length
+            if (newRows > oldRows) return true;
+            return false;
         }
 
         async function checkAvaliable(){
@@ -351,14 +355,15 @@
             }
             try{
                 var res = await axios.get(`https://api.turtle.codingbear.mcloudtw.com/clockin/ClassClockin.aspx?param=${qrcode}`)
-                document.querySelector("label.switch.self-signin").click()
-                console.log("clicked")
-                updateTable(res.data)
-                sendNotify("點名瞜～","請回到烏龜烏龜翹確認一下是否點名成功")
+                if (!updateTable(res.data)) throw "clockin failed : data not updated"
             }
             catch(e){
-                console.log(e)
+                console.error(e)
+                qrcodeLock = false;
+                return;
             }
+            sendNotify("點名瞜～","請回到烏龜烏龜翹確認一下是否點名成功")
+            document.querySelector("label.switch.self-signin").click()
             qrcodeLock = false;
         }
 
