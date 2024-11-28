@@ -165,6 +165,10 @@
         var fcuState = false;
         var qrcodeLock = false;
 
+        setTimeout(()=>{
+            window.location.reload()
+        },3*60*1000)
+
         function toggleLogin() {
             var element = document.querySelector("div.fcu-login");
             var toggleLogin = element.classList.contains("toggle-login")
@@ -428,7 +432,7 @@
 
       initNotify()
 
-    socket.on("refresh",async (qrcodedata)=>{
+    socket.on("QRCodeDetected",async (qrcodedata)=>{
         await selfSingin(qrcodedata);
         console.log("checked")
     })
