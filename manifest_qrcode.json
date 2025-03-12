@@ -1,0 +1,20 @@
+{
+  "name": "烏龜客戶端",
+  "short_name": "烏龜客戶端",
+  "start_url": "https://turtle.codingbear.mcloudtw.com/qrcode",
+  "display": "standalone",
+  "background_color": "#fff",
+  "theme_color": "#fff",
+  "icons": [
+    {
+      "src": "https://turtle.codingbear.mcloudtw.com/public/icon-qrcode-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://turtle.codingbear.mcloudtw.com/public/icon-qrcode-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
