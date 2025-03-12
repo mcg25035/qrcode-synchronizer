@@ -16,6 +16,14 @@ app.get('/scanner', (req, res) => {
     res.sendFile(__dirname + '/scanner.html');
 });
 
+app.get('/manifest_qrcode.json', (req, res) => {
+    res.sendFile(__dirname + '/manifest_qrcode.json');
+});
+
+app.get('/manifest_scanner.json', (req, res) => {
+    res.sendFile(__dirname + '/manifest_scanner.json');
+});
+
 // Handle Socket.io connections
 io.on('connection', (socket) => {
     console.log('A user connected');
